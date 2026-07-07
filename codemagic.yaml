@@ -20,7 +20,16 @@ workflows:
       - name: Build iOS (no codesign)
         script: |
           set -ex
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign || \
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM=0000000000 \
+            FLUTTER_SUPPRESS_ANALYTICS=true
       - name: Create IPA
         script: |
           set -ex
