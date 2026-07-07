@@ -1,27 +1,41 @@
 workflows:
   ios-ipa:
     name: iOS IPA
-    max_build_duration: 60
+    max_build_duration: 90
     environment:
-      flutter: stable
-      xcode: latest
+      flutter: 3.22.2
+      xcode: 16.0
       cocoapods: default
     scripts:
       - name: Install dependencies
         script: |
+          set -ex
           flutter pub get
       - name: Install CocoaPods dependencies
         script: |
-          cd ios && pod install && cd ..
-      - name: Build IPA (no codesign)
+          set -ex
+          cd ios
+          pod install
+          cd ..
+      - name: Build iOS (no codesign)
         script: |
+          set -ex
           flutter build ios --release --no-codesign
       - name: Create IPA
         script: |
-          mkdir -p build/ios/ipa
-          cd build/ios/iphoneos
-          mkdir -p Payload
-          cp -r Runner.app Payload/
-          zip -r -y ../ipa/MyEado.ipa Payload
+          set -ex
+          APP_PATH=$(find build -name "Runner.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: Runner.app not found anywhere under build/"
+            find . -name "Runner.app" -type d
+            exit 1
+          fi
+          echo "Found Runner.app at: $APP_PATH"
+          IPA_DIR="build/ios/ipa"
+          mkdir -p "$IPA_DIR/Payload"
+          cp -r "$APP_PATH" "$IPA_DIR/Payload/"
+          cd "$IPA_DIR"
+          zip -r -y MyEado.ipa Payload
+          ls -la MyEado.ipa
     artifacts:
       - build/ios/ipa/*.ipa
