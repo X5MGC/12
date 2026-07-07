@@ -564,7 +564,7 @@ class _LoginPageState extends State<LoginPage> {
 
               height: size.height,
 
-              color: Colors.black.withValues(alpha: 0.6),
+              color: Colors.black.withOpacity( 0.6),
 
             ),
 
@@ -598,7 +598,7 @@ class _LoginPageState extends State<LoginPage> {
 
                         decoration: BoxDecoration(
 
-                          color: const Color(0xFF1E88E5).withValues(alpha: 0.1),
+                          color: const Color(0xFF1E88E5).withOpacity( 0.1),
 
                           borderRadius: BorderRadius.circular(24),
 
@@ -675,7 +675,7 @@ class _LoginPageState extends State<LoginPage> {
 
                       decoration: BoxDecoration(
 
-                        color: const Color(0xFF1A1A1A).withValues(alpha: 0.8),
+                        color: const Color(0xFF1A1A1A).withOpacity( 0.8),
 
                         borderRadius: BorderRadius.circular(12),
 
@@ -815,7 +815,7 @@ class _LoginPageState extends State<LoginPage> {
 
                       decoration: BoxDecoration(
 
-                        color: const Color(0xFF1A1A1A).withValues(alpha: 0.8),
+                        color: const Color(0xFF1A1A1A).withOpacity( 0.8),
 
                         borderRadius: BorderRadius.circular(12),
 
@@ -987,13 +987,13 @@ class _LoginPageState extends State<LoginPage> {
 
                         disabledBackgroundColor:
 
-                            const Color(0xFF1E88E5).withValues(alpha: 0.3),
+                            const Color(0xFF1E88E5).withOpacity( 0.3),
 
                         foregroundColor: Colors.white,
 
                         disabledForegroundColor:
 
-                            Colors.white.withValues(alpha: 0.5),
+                            Colors.white.withOpacity( 0.5),
 
                         padding: const EdgeInsets.symmetric(vertical: 16),
 
@@ -1889,7 +1889,7 @@ marker.setMap(map);
 
                 decoration: BoxDecoration(
 
-                  color: Colors.black.withValues(alpha: 0.6),
+                  color: Colors.black.withOpacity( 0.6),
 
                   shape: BoxShape.circle,
 
@@ -1982,7 +1982,7 @@ marker.setMap(map);
 
                   BoxShadow(
 
-                      color: Colors.black.withValues(alpha: 0.3),
+                      color: Colors.black.withOpacity( 0.3),
 
                       blurRadius: 10)
 
@@ -2086,7 +2086,7 @@ marker.setMap(map);
 
         decoration: BoxDecoration(
 
-          color: Colors.black.withValues(alpha: 0.6),
+          color: Colors.black.withOpacity( 0.6),
 
           borderRadius: BorderRadius.circular(20),
 
@@ -3461,7 +3461,7 @@ class _HomePageState extends State<HomePage>
 
             height: size.height,
 
-            color: Colors.black.withValues(alpha: 0.3),
+            color: Colors.black.withOpacity( 0.3),
 
           ),
 
@@ -3912,7 +3912,7 @@ class _HomePageState extends State<HomePage>
 
                                                     color: Colors.black
 
-                                                        .withValues(alpha: 0.6),
+                                                        .withOpacity( 0.6),
 
                                                     borderRadius:
 
@@ -4207,7 +4207,7 @@ class _HomePageState extends State<HomePage>
 
                                           color: Colors.white
 
-                                              .withValues(alpha: 0.7),
+                                              .withOpacity( 0.7),
 
                                           height: 1.8,
 
@@ -4225,7 +4225,7 @@ class _HomePageState extends State<HomePage>
 
                                           color: Colors.white
 
-                                              .withValues(alpha: 0.7),
+                                              .withOpacity( 0.7),
 
                                           height: 1.8,
 
@@ -4243,7 +4243,7 @@ class _HomePageState extends State<HomePage>
 
                                           color: Colors.white
 
-                                              .withValues(alpha: 0.7),
+                                              .withOpacity( 0.7),
 
                                           height: 1.8,
 
@@ -4345,7 +4345,7 @@ class _HomePageState extends State<HomePage>
 
               color: isActive
 
-                  ? const Color(0xFF007AFF).withValues(alpha: 0.7)
+                  ? const Color(0xFF007AFF).withOpacity( 0.7)
 
                   : const Color(0xFF2B3136),
 
