@@ -20,31 +20,28 @@ workflows:
       - name: Build iOS (no codesign)
         script: |
           set -ex
-          flutter build ios --release --no-codesign || \
-          xcodebuild -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build/ios \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            DEVELOPMENT_TEAM=0000000000 \
-            FLUTTER_SUPPRESS_ANALYTICS=true
+          flutter build ios --release --no-codesign
       - name: Create IPA
         script: |
           set -ex
-          APP_PATH=$(find build -name "Runner.app" -type d | head -1)
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: Runner.app not found anywhere under build/"
-            find . -name "Runner.app" -type d
+          # flutter build ios 的标准输出路径
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Runner.app not at $APP_PATH, searching..."
+            APP_PATH=$(find build -path "*/iphoneos/Runner.app" -type d | head -1)
+          fi
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: Runner.app not found"
+            find build -name "Runner.app" -type d
             exit 1
           fi
           echo "Found Runner.app at: $APP_PATH"
-          IPA_DIR="build/ios/ipa"
-          mkdir -p "$IPA_DIR/Payload"
-          cp -r "$APP_PATH" "$IPA_DIR/Payload/"
-          cd "$IPA_DIR"
+          rm -rf build/ios/ipa
+          mkdir -p build/ios/ipa/Payload
+          cp -r "$APP_PATH" build/ios/ipa/Payload/
+          cd build/ios/ipa
           zip -r -y MyEado.ipa Payload
+          echo "=== IPA created ==="
           ls -la MyEado.ipa
     artifacts:
       - build/ios/ipa/*.ipa
