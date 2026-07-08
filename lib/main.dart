@@ -1501,7 +1501,7 @@ class _MapDetailPageState extends State<MapDetailPage> {
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-<style>html,body,#map{margin:0;padding:0;width:100%;height:100%}.amap-logo,.amap-copyright{display:none!important}</style>
+<style>html,body,#map{margin:0;padding:0;width:100%;height:100%}.amap-logo,.amap-copyright{display:none!important}.amap-maps{filter:invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85)}</style>
 
 </head>
 
@@ -5794,6 +5794,8 @@ class _HomePageState extends State<HomePage>
   html, body, #map { margin:0; padding:0; width:100%; height:100%; }
 
   .amap-logo, .amap-copyright { display:none !important; }
+
+  .amap-maps { filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85); }
 
 </style>
 
