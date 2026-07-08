@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class Car3DViewer extends StatefulWidget {
@@ -64,19 +65,35 @@ class Car3DViewerState extends State<Car3DViewer> {
   Future<void> _loadModel() async {
     try {
       debugPrint('Loading GLB...');
-      // 等待 viewer.html 中的 JS IIFE 执行完毕（viewer.html 有 793KB，iOS 12 上 onPageFinished 可能在 JS 执行完之前触发）
+      // 等待 viewer.html JS IIFE 执行完毕（793KB，iOS 12 上 onPageFinished 可能在 JS 执行完之前触发）
       for (int i = 0; i < 20; i++) {
         try {
           final result = await _controller.runJavaScriptReturningResult(
-            'typeof window.loadGLB === "function"',
+            'typeof window.appendChunk === "function"',
           );
           if (result.toString() == 'true') break;
         } catch (_) {}
         await Future.delayed(const Duration(milliseconds: 200));
       }
-      // 直接让 HTML 用相对路径加载 GLB，避免传递 2.2MB base64 字符串
-      await _controller.runJavaScript("loadGLB('C211.glb')");
-      debugPrint('loadGLB called');
+      // 读取 GLB 文件并 base64 编码
+      final data = await rootBundle.load('assets/3D/C211.glb');
+      final bytes = data.buffer.asUint8List();
+      debugPrint('GLB size: ${bytes.length}');
+      final b64 = base64Encode(bytes);
+      debugPrint('Base64 size: ${b64.length}');
+      // 分块传递（iOS 12 单次 JS 调用字符串有大小限制）
+      const chunkSize = 100 * 1024; // 100KB per chunk
+      for (int offset = 0; offset < b64.length; offset += chunkSize) {
+        final end = (offset + chunkSize < b64.length)
+            ? offset + chunkSize
+            : b64.length;
+        final chunk = b64.substring(offset, end);
+        await _controller
+            .runJavaScript("appendChunk('$chunk')");
+      }
+      debugPrint('All chunks sent, calling finishLoadGLB');
+      await _controller.runJavaScript('finishLoadGLB()');
+      debugPrint('finishLoadGLB called');
     } catch (e) {
       debugPrint('Error loading GLB: $e');
     }

@@ -5248,11 +5248,18 @@ else
   }
   animate();
 
-  window.loadGLB = function(url) {
+  window._glbChunks = [];
+    window.appendChunk = function(chunk) { window._glbChunks.push(chunk); };
+    window.finishLoadGLB = function() {
     try {
+      var base64 = window._glbChunks.join('');
+      window._glbChunks = [];
+      var raw = atob(base64);
+      var bytes = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
       var loader = new THREE.GLTFLoader();
       loader.setMeshoptDecoder(MeshoptDecoder);
-      loader.load(url || 'C211.glb', function(gltf) {
+      loader.parse(bytes.buffer, '', function(gltf) {
       var model = gltf.scene;
       window._model = model;
       model.scale.set(1, 1, 1);
