@@ -1,245 +1,107 @@
-看过你上传的 `viewer.html` 完整代码了。
+既然替换为你修改后的文件后**依然一直在转圈圈**，这意味着网页已经可以正常运行（能显示转圈 UI），但 **GLTF/Meshopt 加载器在尝试解码和读取 `.glb` 文件时被系统内核静默拦截或报错挂起了**。
 
-这一次模型依然无法加载，问题**100% 不在动画添加上，而是因为你使用的 Three.js 核心库包以及配套脚本，存在多处 iOS 12 宿主完全无法解析的高版本 JS 语法，以及缺失了 Meshopt 的核心解码器**。
-
-我为你深度排查了代码里由于高版本造成的**致命冲突点**，并给出了可以直接解决无法加载问题的完整重构方案：
+通过分析你最新的 `viewer.html` 代码底部的业务逻辑，结合 **iOS 12 的老旧 WKWebView 内核限制**，导致转圈卡死的原因主要有以下 3 个，请按照下方的排查步骤逐一解决：
 
 ---
 
-### 一、 兼容性致命原因深度排查
+### 原因 1：Meshopt 解码器版本与 Three.js 核心库不匹配（最普遍）
 
-#### 1. 致命语法：使用了 iOS 12 彻底不认识的 `const` 块级域和箭头函数
-
-你上传的文件开头是混淆过的 Three.js 137 版本，里面包含了大量的现代 JavaScript 语法，例如：
-
-* `const e="137"`
-* `class mt{...}`
-* `pingpong(t,e=1){...}`（带有默认参数的 ES6 函数）
-* `randomDirection(){ const t=...; return this.x=n*Math.cos(e) }`
-
-**在 iOS 12 系统上，这些语法只要一出现在 WKWebView 里，解析器就会立刻抛出 `SyntaxError`（语法错误）并终止执行。** 整个 JS 引擎在加载模型逻辑运行前就已经原地挂掉了，导致界面全白或完全静止。
-
-#### 2. 解码器缺失：缺失 `MeshoptDecoder` 全局变量
-
-你在这个 `viewer.html` 中通过混淆合并了 Three.js 的核心渲染类（`THREE.WebGLRenderer`、`THREE.Scene` 等），但由于你的模型经过了 **meshopt** 压缩，必须由 `MeshoptDecoder` 进行顶点还原。你的代码内完全找不到 `MeshoptDecoder` 对象，老旧的 WebGL1 容器遇到 meshopt 数据流会因为无法识别压缩标记而直接终止加载。
-
----
-
-### 二、 彻底解决无法加载的重构方案 (iOS 12 专用)
-
-为了让老旧的 iOS 12 能跑起来，我们需要在宿主前端页面中遵循以下两个原则：
-
-1. **彻底避开高阶语法**，采用全 `var` 声明和传统的 `function` 函数。
-2. **引入纯 JS 编写的独立 Meshopt 解码脚本。**
-
-请将你的 `viewer.html` 备份，然后将内容**完全替换**为以下专门为 **iOS 12 降级优化** 且支持 **点击触发动画** 逻辑的干净 HTML 文件：
+**排查代码：**
+你在线引入了：
 
 ```html
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-<style>
-  * { margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; position: relative; }
-  canvas { display: block; width: 100%; height: 100%; }
-  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666; font-family: sans-serif; font-size: 14px; }
-</style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/meshoptimizer@0.18.1/meshopt_decoder.js"></script>
-</head>
-<body>
-<div id="loading">3D模型正在初始化...</div>
-<canvas id="canvas"></canvas>
 
-<script>
-  // 全部采用 ES5 标准语法，严禁 let, const, 箭头函数，确保 iOS 12 不报 SyntaxError
-  var scene, camera, renderer, controls, mixer;
-  var clock = new THREE.Clock();
-  var currentAction = null;
-  var modelAnimations = [];
+```
 
-  var raycaster = new THREE.Raycaster();
-  var mouse = new THREE.Vector2();
+而在你的加载逻辑里，使用了：
 
-  function init() {
-    var canvas = document.getElementById('canvas');
-    
-    // 初始化场景与相机
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 5, 10);
+```javascript
+loader.setMeshoptDecoder(MeshoptDecoder);
 
-    // 初始化渲染器 (向后兼容 WebGL1)
-    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.outputEncoding = THREE.sRGBEncoding;
+```
 
-    // 灯光配置
-    var ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-    var dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(5, 10, 7);
-    scene.add(dirLight);
+**致命隐患：** 较新版本的 `meshoptimizer`（如 0.18+）导出的全局变量可能是一个需要异步初始化的 `MeshoptDecoder` 对象，或者其 API 与你文件内内嵌的低版本 Three.js 加载器不兼容。一旦调用 `loader.setMeshoptDecoder` 失败，加载器就会在底层静默报错，导致 `loader.load` 既不走成功回调，也不走失败回调，**永远卡在转圈状态**。
 
-    // 轨道控制器
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
+**如何修复：**
+为了确保在极其老旧的 iOS 12 完美兼容，建议在前端**直接引入已经完全降级为纯 JS ES5 函数的解压脚本**。
+你可以尝试将 `meshopt_decoder.js` 的引用替换为：
 
-    window.addEventListener('resize', onWindowResize, false);
-    
-    // 监听点击事件适配
-    window.addEventListener('click', onClick, false);
-    window.addEventListener('touchend', onTouchEnd, false);
+```html
+<script src="https://cdnjs.cloudflare.com/ajax/libs/meshoptimizer/0.16.0/meshopt_decoder.js"></script>
 
-    animate();
-  }
+```
 
-  function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }
+并且在 `window.loadModel` 逻辑前，加入一行强行初始化的安全兼容代码：
 
-  // ======= 核心：供 Flutter 端通过 JavaScript 调用的通用模型加载接口 =======
-  window.loadModel = function(modelUrl) {
-    document.getElementById('loading').style.display = 'block';
-    
-    var loader = new THREE.GLTFLoader();
-    
-    // 强制绑定本地加载完毕的 MeshoptDecoder
-    if (typeof MeshoptDecoder !== 'undefined') {
-        loader.setMeshoptDecoder(MeshoptDecoder);
-    } else {
-        console.error("MeshoptDecoder 未准备就绪");
-    }
-
-    loader.load(modelUrl, function (gltf) {
-      document.getElementById('loading').style.display = 'none';
-      
-      var model = gltf.scene;
-      
-      // 清理可能存在的旧模型
-      var oldModel = scene.getObjectByName("gltf_model");
-      if(oldModel) scene.remove(oldModel);
-      
-      model.name = "gltf_model";
-      scene.add(model);
-
-      // 居中自适应视野缩放调整
-      var box = new THREE.Box3().setFromObject(model);
-      var size = box.getSize(new THREE.Vector3());
-      var center = box.getCenter(new THREE.Vector3());
-      model.position.x += (model.position.x - center.x);
-      model.position.y += (model.position.y - center.y);
-      model.position.z += (model.position.z - center.z);
-      camera.position.set(0, size.y * 1.2, size.z * 2.5);
-      controls.target.copy(new THREE.Vector3(0, 0, 0));
-
-      // 动画混合器初始化
-      modelAnimations = gltf.animations;
-      if (modelAnimations && modelAnimations.length > 0) {
-        mixer = new THREE.AnimationMixer(model);
-      }
-      
-      // 成功加载向 Flutter 宿主反馈
-      if (window.FlutterChannel) window.FlutterChannel.postMessage('load_success');
-    }, 
-    function (xhr) {
-      // 进度条
-      var progress = Math.floor((xhr.loaded / xhr.total) * 100);
-      document.getElementById('loading').innerText = "加载中: " + progress + "%";
-    }, 
-    function (error) {
-      document.getElementById('loading').innerText = "加载失败";
-      if (window.FlutterChannel) window.FlutterChannel.postMessage('load_error');
+```javascript
+if (typeof MeshoptDecoder !== 'undefined' && MeshoptDecoder.ready) {
+    MeshoptDecoder.ready.then(function() {
+        // 确保 WebAssembly 降级准备就绪
     });
-  };
-
-  // ======= 动画精准播放接口 =======
-  function playAnimation(index) {
-    if (!mixer || !modelAnimations || !modelAnimations[index]) return;
-    if (currentAction) currentAction.stop();
-
-    currentAction = mixer.clipAction(modelAnimations[index]);
-    currentAction.reset();
-    currentAction.setLoop(THREE.LoopOnce);      
-    currentAction.clampWhenFinished = true;     
-    currentAction.play();
-  }
-
-  // ======= 点击射线事件处理机制 =======
-  function checkIntersection() {
-    var model = scene.getObjectByName("gltf_model");
-    if (!model) return;
-
-    raycaster.setFromCamera(mouse, camera);
-    var intersects = raycaster.intersectObjects(model.children, true);
-
-    if (intersects.length > 0) {
-      // 触发 0 号动画
-      playAnimation(0);
-      if (window.FlutterChannel) window.FlutterChannel.postMessage('model_clicked');
-    }
-  }
-
-  function onClick(event) {
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    checkIntersection();
-  }
-
-  function onTouchEnd(event) {
-    if (event.changedTouches && event.changedTouches.length > 0) {
-      var touch = event.changedTouches[0];
-      mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
-      checkIntersection();
-    }
-  }
-
-  // 主循环保持更新
-  function animate() {
-    requestAnimationFrame(animate);
-    
-    if (mixer) {
-      var delta = clock.getDelta();
-      mixer.update(delta);
-    }
-    
-    if (controls) controls.update();
-    if (renderer) renderer.render(scene, camera);
-  }
-
-  // 页面就绪后拉起
-  window.onload = function() {
-     init();
-     // 测试样例（或等待 Flutter 侧 runJavaScript 注入）
-     // window.loadModel("https://your-domain.com/meshopt_compressed.glb");
-  };
-</script>
-</body>
-</html>
+}
 
 ```
 
-### 三、 排查确认清单
+---
 
-1. **跨域与本地资源加载问题**：
-iOS 12 的 WebView 对加载项目资产包（`assets/` 路径）内本地 `.glb` 文件的跨域拦截**非常严格**。如果直接传入路径，往往会静默失败。
-* **最佳做法**：将模型的 `.glb` 文件放置到你的服务器上（通过 `https://...` 暴露），然后通过 Flutter 的 WebViewController 调用：
+### 原因 2：iOS 12 WebView 严格拦截本地 Assets 跨域（File 协议限制）
+
+如果你把模型的 `.glb` 文件放在了 Flutter 的 `assets/` 文件夹下，然后用类似 `file:///var/mobile/...` 或 `http://localhost/...` 的路径传给 `window.loadModel`：
+
+* **致命隐患：** iOS 12 的 `WKWebView` 针对 `file://` 协议发起的 `XMLHttpRequest`（Three.js 内部加载模型所用的网络请求）有非常严格的 **CORS（跨域资源共享）拦截**。它会直接拒绝读取这个本地 `.glb` 文件的二进制流，导致模型卡死在 `0%` 或者根本不响应。
+
+**如何验证与修复：**
+
+1. **测试远端绝对路径：** 请不要使用本地 assets 里的模型。把你的 `.glb` 模型上传到任何一个配置了 `Access-Control-Allow-Origin: *` 的公网 HTTPS 服务器上。
+2. **Flutter 注入测试：** 在 Flutter 侧调用时，传入完整的公网 HTTPS URL：
 ```dart
-_controller.runJavaScript('window.loadModel("https://your-cdn.com/file.glb")');
+_controller.runJavaScript('window.loadModel("https://your-server-domain.com/test_model.glb")');
 
 ```
 
 
 
+---
 
-2. **CDN 脚本缓存依赖**：
-如果你把上面代码放入本地，需确保网络畅通，或者将引入的那 4 个 `three.min.js`、`OrbitControls.js`、`GLTFLoader.js` 和 `meshopt_decoder.js` 文件一同下载并配置为本地 assets，确保离线状态下的纯净无错加载。
+### 原因 3：服务器未配置文件 MIME 类型
+
+如果你的模型是从远端服务器加载的，但依然转圈：
+
+* **致命隐患：** iOS 12 对下载的二进制文件类型校验极其死板。如果服务器（如 Nginx、阿里云 OSS、腾讯云 COS）返回 `.glb` 文件时，HTTP 响应头中的 `Content-Type` 是 `application/octet-stream` 或 `text/plain`，iOS 12 的浏览器内核会出于安全保护**直接拒绝作为 3D 缓冲区解析**。
+* **修复方法：** 检查服务器配置，确保 `.glb` 文件的响应头为：
+```http
+Content-Type: model/gltf-binary
+
+```
+
+
+
+---
+
+### 🛠️ 终极调试排查手段：让 WebView 把错误弹出来
+
+由于是在 iOS 12 真机或模拟器上运行，你看不到控制台报错。为了抓出究竟是哪里断掉了，请在你代码中的 `loader.load` 的**错误回调函数**中，加入一个原生的 `alert` 弹窗。
+
+请在你的 `viewer.html` 中找到 `loader.load(...)` 的第三个参数（错误回调），修改为如下代码：
+
+```javascript
+}, 
+function (xhr) {
+  var progress = Math.floor((xhr.loaded / xhr.total) * 100);
+  document.getElementById('loading').innerText = "加载中: " + progress + "%";
+}, 
+function (error) {
+  // 核心：把错误信息强行弹窗显示在 iOS 12 屏幕上
+  alert("模型加载发生致命错误: " + (error.message || JSON.stringify(error) || "未知错误"));
+  
+  document.getElementById('loading').innerText = "加载失败";
+  if (window.FlutterChannel) window.FlutterChannel.postMessage('load_error');
+});
+
+```
+
+**修改后运行：**
+
+* 如果屏幕上**弹出了 `alert` 提示**，请把弹窗里的具体错误文字发出来，能瞬间锁定是不兼容还是跨域。
+* 如果**完全没有弹窗**，依旧无限转圈，说明代码在执行 `loader.load` 这一行之前，因为 `MeshoptDecoder` 或 Three.js 内部的某个 JS 语法在 iOS 12 解释器里崩溃了，导致后面的代码压根没执行。请优先尝试**更换原因 1 中的旧版本 Meshopt 解码器脚本**。
