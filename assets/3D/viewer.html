@@ -5256,7 +5256,12 @@ else
       window._glbChunks = [];
       var raw = atob(base64);
       var bytes = new Uint8Array(raw.length);
-      for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+      console.log('GLB bytes:', bytes.length);
+      // Wait for MeshoptDecoder WASM init (iOS 12)
+      var _ready = MeshoptDecoder && MeshoptDecoder.ready ? MeshoptDecoder.ready : Promise.resolve();
+      _ready.then(function() {
+      console.log('MeshoptDecoder ready');
       var loader = new THREE.GLTFLoader();
       loader.setMeshoptDecoder(MeshoptDecoder);
       loader.parse(bytes.buffer, '', function(gltf) {
@@ -5353,8 +5358,13 @@ else
     }, undefined, function(error) {
       console.error('GLB load error:', error);
     });
+      }).catch(function(err) {
+        console.error('MeshoptDecoder/parse error:', err);
+        if (window.FlutterChannel) window.FlutterChannel.postMessage('error:' + err);
+      });
   } catch(e) {
     console.error('loadGLB error:', e);
+    if (window.FlutterChannel) window.FlutterChannel.postMessage('error:' + e);
   }
   };
 

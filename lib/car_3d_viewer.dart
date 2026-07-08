@@ -39,6 +39,8 @@ class Car3DViewerState extends State<Car3DViewer> {
           debugPrint('JS Channel: ${message.message}');
           if (message.message == 'loaded') {
             if (mounted) setState(() => _loaded = true);
+          } else if (message.message.startsWith('error:')) {
+            debugPrint('JS Error: ${message.message}');
           } else if (message.message == 'topView') {
             widget.onToggleView?.call(true);
           } else if (message.message == 'normalView') {
