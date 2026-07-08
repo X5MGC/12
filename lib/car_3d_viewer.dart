@@ -102,6 +102,12 @@ class Car3DViewerState extends State<Car3DViewer> {
   }
 
   @override
+  void dispose() {
+    _controller.runJavaScript('window.dispose && window.dispose()');
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Stack(
       children: [

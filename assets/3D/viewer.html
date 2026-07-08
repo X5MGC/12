@@ -5187,7 +5187,8 @@ else
 <script>
 (function() {
   var canvas = document.getElementById('canvas');
-  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+  var _ctx = canvas.getContext('webgl', { alpha: true, antialias: true });
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, context: _ctx, antialias: true, alpha: true });
   renderer.setSize(canvas.clientWidth, canvas.clientHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setClearColor(0xffffff, 0);
@@ -5316,15 +5317,11 @@ else
 
         // CarPaint -> MeshPhysicalMaterial
         if (name.indexOf('CarPaint') !== -1 || name.indexOf('Body') !== -1) {
-          child.material = new THREE.MeshPhysicalMaterial({
+          child.material = new THREE.MeshStandardMaterial({
             color: 0xffffff,
             metalness: 0.1,
             roughness: 0.4,
-            clearcoat: 1,
-            clearcoatRoughness: 0.2,
-            reflectivity: 0.5,
-            sheen: 0.1,
-            envMap: scene.environment,
+            envMapenvMap: scene.environment,
             envMapIntensity: 0.5
           });
         }
@@ -5369,6 +5366,14 @@ else
   };
 
   console.log('Viewer ready');
+  window.dispose = function() {
+    try {
+      if (window._mixer) window._mixer.stopAllAction();
+      if (renderer) { renderer.dispose(); renderer.forceContextLoss(); }
+      if (scene) { scene.traverse(function(obj) { if (obj.geometry) obj.geometry.dispose(); if (obj.material) { if (obj.material.map) obj.material.map.dispose(); obj.material.dispose(); } }); }
+      console.log('Viewer disposed');
+    } catch(e) { console.error('Dispose error:', e); }
+  };
 
   // --- Animation functions (matching demo) ---
   window.playAnimation = function(name, reverse) {
