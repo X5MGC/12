@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class Car3DViewer extends StatefulWidget {
@@ -65,12 +64,18 @@ class Car3DViewerState extends State<Car3DViewer> {
   Future<void> _loadModel() async {
     try {
       debugPrint('Loading GLB...');
-      final data = await rootBundle.load('assets/3D/C211.glb');
-      final bytes = data.buffer.asUint8List();
-      debugPrint('GLB size: ${bytes.length}');
-      final b64 = base64Encode(bytes);
-      debugPrint('Base64 size: ${b64.length}');
-      await _controller.runJavaScript("loadGLB('${b64}')");
+      // 等待 viewer.html 中的 JS IIFE 执行完毕（viewer.html 有 793KB，iOS 12 上 onPageFinished 可能在 JS 执行完之前触发）
+      for (int i = 0; i < 20; i++) {
+        try {
+          final result = await _controller.runJavaScriptReturningResult(
+            'typeof window.loadGLB === "function"',
+          );
+          if (result.toString() == 'true') break;
+        } catch (_) {}
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+      // 直接让 HTML 用相对路径加载 GLB，避免传递 2.2MB base64 字符串
+      await _controller.runJavaScript("loadGLB('C211.glb')");
       debugPrint('loadGLB called');
     } catch (e) {
       debugPrint('Error loading GLB: $e');

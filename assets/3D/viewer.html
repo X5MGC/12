@@ -5248,14 +5248,11 @@ else
   }
   animate();
 
-  window.loadGLB = function(base64) {
+  window.loadGLB = function(url) {
     try {
-      var binary = atob(base64);
-      var bytes = new Uint8Array(binary.length);
-      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       var loader = new THREE.GLTFLoader();
       loader.setMeshoptDecoder(MeshoptDecoder);
-      loader.parse(bytes.buffer, '', function(gltf) {
+      loader.load(url || 'C211.glb', function(gltf) {
       var model = gltf.scene;
       window._model = model;
       model.scale.set(1, 1, 1);
