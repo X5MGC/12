@@ -1,150 +1,245 @@
-针对这份代码文件在 **iOS 12** 的内嵌 WebView 容器中加载经过 **Meshopt 压缩的 GLB 模型及动画**，我已经对其核心的兼容性、语法和 API 进行了专项排查。
+看过你上传的 `viewer.html` 完整代码了。
 
-以下是具体的兼容性检查结果、核心安全隐患以及解决方案：
+这一次模型依然无法加载，问题**100% 不在动画添加上，而是因为你使用的 Three.js 核心库包以及配套脚本，存在多处 iOS 12 宿主完全无法解析的高版本 JS 语法，以及缺失了 Meshopt 的核心解码器**。
 
----
-
-### 一、 兼容性硬伤排查结果（代码层）
-
-#### 1. Wasm 解码与多 thread（多线程）支持问题
-
-* **代码现状**：在 Meshopt 或 GLTF 动画加载中，如果引用了基于 Wasm 并开启多线程（SharedArrayBuffer）的解码器，iOS 12 会彻底卡死。iOS 12 在 WebKit 内核中对 `SharedArrayBuffer` 的支持默认是关闭或不完整的。
-* **解决要求**：你需要确保在代码未展示的 `GLTFLoader` 配置部分，引入的是纯 JS 版本的 `meshopt_decoder.js`（非 Wasm 甚至是非 Worker 版本），或者确保 Wasm 强制运行在**单线程**模式。
-
-#### 2. 最新 JS 语法的语法报错（Syntax Error）
-
-* **代码现状**：从你文件的第一行代码看，Three.js 被混淆打包过，其中包含了大量的 ES6+ 语法，例如：
-* 解构赋值 `const [i, r, s, a, o, l] = this.children` (出处：`update` 函数)
-* 可选链与空值合并运算符（如 `??`、`?.` 语法，常见于 Three.js v135+ 的内置库）
-
-
-* **致命隐患**：**iOS 12 系统的 JavaScriptCore 引擎对于部分现代 ES 语法（特别是可选链和空值合并，以及某些解构）不完全支持**。一旦低版本 iOS 的 WebView 遇到不支持的语法符号，会直接抛出 `Syntax Error` 错误，整个网页脚本会原地挂掉，表现为全白屏。
-* **解决要求**：你的混淆代码必须经过 **Babel** 降级转换至 **ES5/ES6 兼容标准**，不能保留过于先进的 JS 语法标记。
-
-#### 3. WebGL 2.0 降级兼容 (WebGL2 vs WebGL1)
-
-* **代码现状**：你使用的 Three.js r137 默认会优先尝试初始化 WebGL 2.0 上下文 (`dt="300 es"`)。
-* **致命隐患**：iOS 12 默认采用 WebGL 1.0。虽然该版本的 Three.js 具备向后兼容能力（如果 WebGL2 创建失败会自动降级到 WebGL1），但是在 iOS 12 的老旧 WKWebView 下，部分高级的 PBR 材质（物理渲染材质，如 `MeshPhysicalMaterial`）和 Meshopt 特有的顶点量化（`KHR_mesh_quantization`）在 WebGL 1.0 下可能需要额外的扩展支持。
-* **解决要求**：在初始化 `WebGLRenderer` 时，必须显式允许降级，或者直接使用 WebGL 1.0 的 Renderer 进行测试，以保证着色器（Shader）能够顺利编译。
+我为你深度排查了代码里由于高版本造成的**致命冲突点**，并给出了可以直接解决无法加载问题的完整重构方案：
 
 ---
 
-### 二、 如果要在此文件中支持【点击触发动画】，如何保证 iOS 12 兼容？
+### 一、 兼容性致命原因深度排查
 
-如果你想在此文件中融入上一轮提到的点击动画功能（通过射线检测 `Raycaster` 碰撞模型），你的 JS 代码在混淆/拼接时必须遵循低版本规范。
+#### 1. 致命语法：使用了 iOS 12 彻底不认识的 `const` 块级域和箭头函数
 
-请将以下经过 **iOS 12 语法降级优化**（全采用 `var`、标准函数，避免前沿高级语法）的代码整合进你文件的尾部：
+你上传的文件开头是混淆过的 Three.js 137 版本，里面包含了大量的现代 JavaScript 语法，例如：
 
-```javascript
-// ==========================================
-// iOS 12 安全动画控制变量定义
-// ==========================================
-var mixer = null;
-var clock = new THREE.Clock();
-var modelAnimations = [];
-var currentAction = null;
+* `const e="137"`
+* `class mt{...}`
+* `pingpong(t,e=1){...}`（带有默认参数的 ES6 函数）
+* `randomDirection(){ const t=...; return this.x=n*Math.cos(e) }`
 
-// ==========================================
-// 射线检测变量 (全部使用 var 避开 iOS12 的 const 块级域问题)
-// ==========================================
-var raycaster = new THREE.Raycaster();
-var mouse = new THREE.Vector2();
+**在 iOS 12 系统上，这些语法只要一出现在 WKWebView 里，解析器就会立刻抛出 `SyntaxError`（语法错误）并终止执行。** 整个 JS 引擎在加载模型逻辑运行前就已经原地挂掉了，导致界面全白或完全静止。
 
-// ==========================================
-// 修改或注入你的 GLTF 加载回调
-// ==========================================
-/* gltfLoader.load(modelUrl, function(gltf) {
-    var model = gltf.scene;
-    scene.add(model);
+#### 2. 解码器缺失：缺失 `MeshoptDecoder` 全局变量
+
+你在这个 `viewer.html` 中通过混淆合并了 Three.js 的核心渲染类（`THREE.WebGLRenderer`、`THREE.Scene` 等），但由于你的模型经过了 **meshopt** 压缩，必须由 `MeshoptDecoder` 进行顶点还原。你的代码内完全找不到 `MeshoptDecoder` 对象，老旧的 WebGL1 容器遇到 meshopt 数据流会因为无法识别压缩标记而直接终止加载。
+
+---
+
+### 二、 彻底解决无法加载的重构方案 (iOS 12 专用)
+
+为了让老旧的 iOS 12 能跑起来，我们需要在宿主前端页面中遵循以下两个原则：
+
+1. **彻底避开高阶语法**，采用全 `var` 声明和传统的 `function` 函数。
+2. **引入纯 JS 编写的独立 Meshopt 解码脚本。**
+
+请将你的 `viewer.html` 备份，然后将内容**完全替换**为以下专门为 **iOS 12 降级优化** 且支持 **点击触发动画** 逻辑的干净 HTML 文件：
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<style>
+  * { margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; position: relative; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666; font-family: sans-serif; font-size: 14px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/meshoptimizer@0.18.1/meshopt_decoder.js"></script>
+</head>
+<body>
+<div id="loading">3D模型正在初始化...</div>
+<canvas id="canvas"></canvas>
+
+<script>
+  // 全部采用 ES5 标准语法，严禁 let, const, 箭头函数，确保 iOS 12 不报 SyntaxError
+  var scene, camera, renderer, controls, mixer;
+  var clock = new THREE.Clock();
+  var currentAction = null;
+  var modelAnimations = [];
+
+  var raycaster = new THREE.Raycaster();
+  var mouse = new THREE.Vector2();
+
+  function init() {
+    var canvas = document.getElementById('canvas');
     
-    // 注入动画数据
-    modelAnimations = gltf.animations;
-    if (modelAnimations && modelAnimations.length > 0) {
+    // 初始化场景与相机
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 5, 10);
+
+    // 初始化渲染器 (向后兼容 WebGL1)
+    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputEncoding = THREE.sRGBEncoding;
+
+    // 灯光配置
+    var ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    var dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(5, 10, 7);
+    scene.add(dirLight);
+
+    // 轨道控制器
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    window.addEventListener('resize', onWindowResize, false);
+    
+    // 监听点击事件适配
+    window.addEventListener('click', onClick, false);
+    window.addEventListener('touchend', onTouchEnd, false);
+
+    animate();
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  // ======= 核心：供 Flutter 端通过 JavaScript 调用的通用模型加载接口 =======
+  window.loadModel = function(modelUrl) {
+    document.getElementById('loading').style.display = 'block';
+    
+    var loader = new THREE.GLTFLoader();
+    
+    // 强制绑定本地加载完毕的 MeshoptDecoder
+    if (typeof MeshoptDecoder !== 'undefined') {
+        loader.setMeshoptDecoder(MeshoptDecoder);
+    } else {
+        console.error("MeshoptDecoder 未准备就绪");
+    }
+
+    loader.load(modelUrl, function (gltf) {
+      document.getElementById('loading').style.display = 'none';
+      
+      var model = gltf.scene;
+      
+      // 清理可能存在的旧模型
+      var oldModel = scene.getObjectByName("gltf_model");
+      if(oldModel) scene.remove(oldModel);
+      
+      model.name = "gltf_model";
+      scene.add(model);
+
+      // 居中自适应视野缩放调整
+      var box = new THREE.Box3().setFromObject(model);
+      var size = box.getSize(new THREE.Vector3());
+      var center = box.getCenter(new THREE.Vector3());
+      model.position.x += (model.position.x - center.x);
+      model.position.y += (model.position.y - center.y);
+      model.position.z += (model.position.z - center.z);
+      camera.position.set(0, size.y * 1.2, size.z * 2.5);
+      controls.target.copy(new THREE.Vector3(0, 0, 0));
+
+      // 动画混合器初始化
+      modelAnimations = gltf.animations;
+      if (modelAnimations && modelAnimations.length > 0) {
         mixer = new THREE.AnimationMixer(model);
-    }
-});
-*/
+      }
+      
+      // 成功加载向 Flutter 宿主反馈
+      if (window.FlutterChannel) window.FlutterChannel.postMessage('load_success');
+    }, 
+    function (xhr) {
+      // 进度条
+      var progress = Math.floor((xhr.loaded / xhr.total) * 100);
+      document.getElementById('loading').innerText = "加载中: " + progress + "%";
+    }, 
+    function (error) {
+      document.getElementById('loading').innerText = "加载失败";
+      if (window.FlutterChannel) window.FlutterChannel.postMessage('load_error');
+    });
+  };
 
-// ==========================================
-// 点击事件监听 (移动端触控适配)
-// ==========================================
-window.addEventListener('click', onModelClick, false);
-window.addEventListener('touchend', onModelTouch, false);
+  // ======= 动画精准播放接口 =======
+  function playAnimation(index) {
+    if (!mixer || !modelAnimations || !modelAnimations[index]) return;
+    if (currentAction) currentAction.stop();
 
-function onModelClick(event) {
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    triggerRaycast();
-}
+    currentAction = mixer.clipAction(modelAnimations[index]);
+    currentAction.reset();
+    currentAction.setLoop(THREE.LoopOnce);      
+    currentAction.clampWhenFinished = true;     
+    currentAction.play();
+  }
 
-function onModelTouch(event) {
-    if (event.changedTouches && event.changedTouches.length > 0) {
-        var touch = event.changedTouches[0];
-        mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
-        mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
-        triggerRaycast();
-    }
-}
-
-function triggerRaycast() {
-    if (!mixer || !modelAnimations || modelAnimations.length === 0) return;
+  // ======= 点击射线事件处理机制 =======
+  function checkIntersection() {
+    var model = scene.getObjectByName("gltf_model");
+    if (!model) return;
 
     raycaster.setFromCamera(mouse, camera);
-    // 针对 iOS 12 WebGL 1.0 优化：这里检测 'scene' 或者具体加载出来的 'model' 对象
-    var intersects = raycaster.intersectObjects(scene.children, true);
+    var intersects = raycaster.intersectObjects(model.children, true);
 
     if (intersects.length > 0) {
-        // 点中模型任意部位，播放 0 号动画
-        playiOS12Animation(0);
-        
-        // Flutter 宿主通信
-        if (window.FlutterChannel) {
-            window.FlutterChannel.postMessage('model_clicked');
-        }
+      // 触发 0 号动画
+      playAnimation(0);
+      if (window.FlutterChannel) window.FlutterChannel.postMessage('model_clicked');
     }
-}
+  }
 
-function playiOS12Animation(index) {
-    if (!mixer || !modelAnimations[index]) return;
+  function onClick(event) {
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    checkIntersection();
+  }
 
-    if (currentAction) {
-        currentAction.stop(); // iOS 12 性能考虑，直接 stop 替换淡出(fadeOut)，减少两套动画混合时的计算过载
+  function onTouchEnd(event) {
+    if (event.changedTouches && event.changedTouches.length > 0) {
+      var touch = event.changedTouches[0];
+      mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+      checkIntersection();
     }
+  }
 
-    var clip = modelAnimations[index];
-    currentAction = mixer.clipAction(clip);
-    
-    currentAction.reset();
-    currentAction.setLoop(THREE.LoopOnce);      // 只播放一次
-    currentAction.clampWhenFinished = true;     // 停在最后一帧
-    currentAction.play();
-}
-
-// ==========================================
-// 更新你的 Animate 循环
-// ==========================================
-// 请找到你文件原本的 animation loop 函数 (例如原有逻辑里的渲染循环)，在内部追加以下步进更新：
-/*
-function animate() {
+  // 主循环保持更新
+  function animate() {
     requestAnimationFrame(animate);
-
-    // iOS 12 步进动画状态
+    
     if (mixer) {
-        var delta = clock.getDelta();
-        mixer.update(delta);
+      var delta = clock.getDelta();
+      mixer.update(delta);
     }
+    
+    if (controls) controls.update();
+    if (renderer) renderer.render(scene, camera);
+  }
 
-    // 你原有的渲染逻辑
-    // renderer.render(scene, camera);
-}
-*/
+  // 页面就绪后拉起
+  window.onload = function() {
+     init();
+     // 测试样例（或等待 Flutter 侧 runJavaScript 注入）
+     // window.loadModel("https://your-domain.com/meshopt_compressed.glb");
+  };
+</script>
+</body>
+</html>
 
 ```
 
----
+### 三、 排查确认清单
 
-### 三、 总结：检查清单
+1. **跨域与本地资源加载问题**：
+iOS 12 的 WebView 对加载项目资产包（`assets/` 路径）内本地 `.glb` 文件的跨域拦截**非常严格**。如果直接传入路径，往往会静默失败。
+* **最佳做法**：将模型的 `.glb` 文件放置到你的服务器上（通过 `https://...` 暴露），然后通过 Flutter 的 WebViewController 调用：
+```dart
+_controller.runJavaScript('window.loadModel("https://your-cdn.com/file.glb")');
 
-1. **语法降级（最关键）**：不要在你自己写的附加业务代码、点击检测中使用任何 `??`、`?.`、`let`、`=>` 箭头函数等，全部用打包工具（如 Webpack + Babel）统一降级。
-2. **材质简化**：在 iOS 12 下，如果你的 GLB 含有极复杂的物理折射（Transmission、Clearcoat等高级材质属性），受限于 WebGL 1.0，网页可能会掉帧或渲染错误。推荐使用普通的 **标准 PBR 材质（MeshStandardMaterial）**。
-3. **内存极限**：由于你内嵌的这个 `viewer.html` 本身代码体积已经十分庞大，这意味着 WKWebView 一启动就会吃掉不少运行内存。请配合 Flutter 端，在 Viewer 销毁时务必调用 `_controller.loadRequest(Uri.parse('about:blank'))`，并在前端执行 `renderer.dispose()`、`geometry.dispose()`，否则 iOS 12 很容易因内存泄漏直接崩溃。
+```
+
+
+
+
+2. **CDN 脚本缓存依赖**：
+如果你把上面代码放入本地，需确保网络畅通，或者将引入的那 4 个 `three.min.js`、`OrbitControls.js`、`GLTFLoader.js` 和 `meshopt_decoder.js` 文件一同下载并配置为本地 assets，确保离线状态下的纯净无错加载。
